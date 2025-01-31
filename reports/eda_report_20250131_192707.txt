@@ -1,0 +1,43 @@
+=== Fraud Detection EDA Report ===
+
+Dataset Shape: (10000, 11)
+
+Fraud Rate: 1.08%
+
+Amount Statistics:
+count    10000.000000
+mean        97.749895
+std         97.440471
+min          0.001163
+25%         28.279917
+50%         67.831496
+75%        134.709830
+max        817.244560
+
+Top 5 merchant_category:
+merchant_category
+restaurant       2088
+retail           2024
+entertainment    2007
+other            1941
+travel           1940
+
+Top 5 merchant_country:
+merchant_country
+JP    1569
+DE    1478
+BR    1446
+FR    1414
+US    1386
+
+Top 5 card_type:
+card_type
+virtual    3373
+debit      3342
+credit     3285
+
+Top 5 transaction_type:
+transaction_type
+in-store    3441
+mobile      3323
+online      3236
