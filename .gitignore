@@ -2,34 +2,147 @@
 venv/
 env/
 .env/
+.venv/
+ENV/
+pythonenv*
+
+# Environment variables and secrets
+.env
+.env.*
+*.env
+credentials.json
+secrets.yaml
 
 # Data files
 data/*.csv
 data/*.parquet
 data/raw/
 data/processed/
+data/interim/
+data/external/
+*.csv
+*.parquet
+*.xlsx
+*.xls
+*.h5
+*.pkl
+
+# Model files
+models/*.pkl
+models/*.h5
+models/*.joblib
+models/*.pt
+models/*.pth
+models/*.onnx
+models/checkpoints/
+wandb/
+
+# Logs and outputs
+logs/
+*.log
+output/
+results/
+reports/
+metrics/
+profiling/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Distribution / packaging
-dist/
+.Python
+env/
+venv/
+.venv/
+ENV/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.coverage
+coverage.xml
+.pytest_cache/
+htmlcov/
 
 # Jupyter Notebook
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
+*.ipynb_meta
+jupyter_execute/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
+*.swn
+*.bak
+*.iml
+.project
+.pydevproject
+.settings/
+.vs/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+*.db
+desktop.ini
+.directory
+
+# Documentation
+docs/_build/
+site/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# MLflow
+mlruns/
+mlflow/
+
+# DVC
+.dvc/
+/dvc.lock
+/dvc.yaml
+
+# Weights & Biases
+wandb/
+*.wandb
+
+# Local development configuration
+local_config.yaml
+override.yaml
+
+# Supabase
+.supabase/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+*.cover
+
+# Database
+*.db
+*.sqlite3 
