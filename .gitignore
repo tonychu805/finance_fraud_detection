@@ -1,3 +1,4 @@
+# Python
 .DS_Store
 .coverage
 .pytest_cache/
@@ -21,3 +22,44 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Virtual Environment
+.venv/
+venv/
+
+# Environment Variables
+.env
+.env.*
+
+# Data and Models
+data/raw/
+data/interim/
+data/processed/
+models/*.joblib
+models/*.pkl
+models/*.h5
+
+# Logs and Reports
+logs/
+*.log
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

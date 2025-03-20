@@ -1,0 +1,16 @@
+{
+    "database": {
+        "host": "PROD_DB_HOST",
+        "port": 5432,
+        "name": "fraud_detection_prod"
+    },
+    "api": {
+        "host": "0.0.0.0",
+        "port": 8000,
+        "debug": false
+    },
+    "model": {
+        "version": "prod",
+        "path": "models/prod/"
+    }
+}

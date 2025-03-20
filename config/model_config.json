@@ -1,0 +1,24 @@
+{
+    "model_params": {
+        "boosting_type": "gbdt",
+        "objective": "binary",
+        "metric": "auc",
+        "learning_rate": 0.01,
+        "num_leaves": 31,
+        "max_depth": -1,
+        "min_child_samples": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "n_estimators": 1000,
+        "random_state": 42,
+        "model_path": "models/fraud_detector.lgb"
+    },
+    "training_params": {
+        "test_size": 0.2,
+        "val_size": 0.1,
+        "random_state": 42
+    },
+    "lightgbm_params": "config/lightgbm_params.json",
+    "random_forest_params": "config/random_forest_params.json",
+    "neural_network_params": "config/neural_network_params.json"
+} 
