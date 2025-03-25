@@ -14,12 +14,12 @@ import json
 from datetime import datetime
 import joblib
 
-from data_processor import DataProcessor
-from models.ensemble_model import EnsembleFraudModel
-from model_manager import ModelManager
-from supabase_client import SupabaseClient
-from ml_tracker import MLTracker
-from model_trainer import ModelTrainer
+from fraud_detection.data.processor import DataProcessor
+from fraud_detection.models.ensemble import EnsembleFraudModel
+from fraud_detection.models.manager import ModelManager
+from fraud_detection.database.supabase_client import SupabaseClient
+from fraud_detection.models.ml_tracker import MLTracker
+from fraud_detection.models.training.model_trainer import ModelTrainer
 
 # Configure logging
 logging.basicConfig(

@@ -1,13 +1,9 @@
 # Python
-.DS_Store
-.coverage
-.pytest_cache/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -19,47 +15,214 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 
 # Virtual Environment
-.venv/
-venv/
-
-# Environment Variables
 .env
-.env.*
+.venv/
+env/
+venv/
+ENV/
 
-# Data and Models
-data/raw/
-data/interim/
-data/processed/
-models/*.joblib
-models/*.pkl
-models/*.h5
-
-# Logs and Reports
-logs/
-*.log
-.coverage
-htmlcov/
-
-# IDE
-.vscode/
+# IDE and Editor Files
 .idea/
+.vscode/
 *.swp
 *.swo
+.cursor/
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+*.code-workspace
 
 # Jupyter Notebook
 .ipynb_checkpoints
-*/.ipynb_checkpoints/*
+*.ipynb
+notebooks/*
+!notebooks/examples/
+!notebooks/README.md
 
-# OS generated files
+# Model Artifacts
+models/*.joblib
+models/*.pkl
+models/*.h5
+models/checkpoints/
+!models/.gitkeep
+
+# Data
+data/raw/*
+data/processed/*
+data/interim/*
+data/external/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/interim/.gitkeep
+!data/external/.gitkeep
+
+# Logs and Monitoring
+logs/
+*.log
+.monitoring/
+mlruns/
+wandb/
+tensorboard/
+prometheus/
+grafana/
+*.metrics
+*.monitoring
+drift_reports/
+performance_reports/
+model_health/
+
+# Reports and Visualizations
+reports/figures/*
+reports/model_analysis/*.png
+reports/model_analysis/*.pdf
+reports/*.json
+!reports/figures/.gitkeep
+!reports/README.md
+
+# DVC (Data Version Control)
+.dvc/
+/dvc.lock
+/dvc.yaml
+*.dvc
+
+# MLflow
+mlruns/
+mlflow/
+
+# Testing and Coverage
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+ab_test_results/
+stress_test_results/
+model_validation_results/
+
+# Build and Distribution
+*.manifest
+*.spec
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Hugging Face Spaces
+spaces/models/
+spaces/__pycache__/
+spaces/.env
+
+# Documentation
+docs/_build/
+docs/_static/
+docs/_templates/
+_docs_html/
+.docusaurus/
+model_cards/
+fairness_reports/
+interpretability_reports/
+
+# Environment and Configuration
+.env
+.env.*
+*.cfg
+config/*.local.json
+config/*.local.yaml
+config/*.local.yml
+
+# System Files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
+*.swp
+*.bak
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Secrets and Keys
+*.pem
+*.key
+*.crt
+*.cer
+*.priv
+secrets/
+credentials/
+.secrets/
+.credentials/
+
+# Temporary Files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+.temp/
+tmp/
+
+# Model Monitoring and Analysis
+monitoring/
+  drift_analysis/
+  performance_metrics/
+  model_health/
+  alerts/
+  dashboards/
+  reports/
+
+# A/B Testing
+ab_testing/
+  results/
+  configurations/
+  metrics/
+  reports/
+
+# Model Retraining
+retraining/
+  triggers/
+  logs/
+  results/
+  configurations/
+
+# Model Cards and Documentation
+model_cards/
+  fairness_analysis/
+  interpretability/
+  performance/
+  metadata/
+
+# Stress Testing
+stress_tests/
+  results/
+  configurations/
+  reports/
+  metrics/

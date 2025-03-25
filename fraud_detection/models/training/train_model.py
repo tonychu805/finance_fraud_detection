@@ -18,10 +18,10 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from data_processor import DataProcessor
-from models.ensemble_model import EnsembleFraudModel
-from .ml_tracker import MLTracker
-from .database.supabase_client import SupabaseClient
+from fraud_detection.core.data import DataProcessor
+from fraud_detection.models.ensemble import FraudEnsemble
+from fraud_detection.utils.ml_tracker import MLTracker
+from fraud_detection.database.client import SupabaseClient
 
 # Configure logging
 logging.basicConfig(
@@ -264,7 +264,7 @@ def main():
     
     # Initialize and train model
     logger.info(f"Initializing ensemble model (version: {model_version})")
-    model = EnsembleFraudModel(
+    model = FraudEnsemble(
         model_dir=Path(args.output_dir),
         version=model_version,
         use_neural_network=args.use_neural_network,

@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,14 +37,13 @@ NUMERICAL_FEATURES = [
 ]
 
 TIME_FEATURES = [
-    "step",  # Changed from timestamp-based features
+    "step",  # We'll use this for time-based splitting
 ]
 
 # These columns will be dropped during preprocessing
 COLUMNS_TO_DROP = [
     "nameOrig",
     "nameDest",
-    "step",  # We'll create better time-based features
     "isFlaggedFraud",  # Remove this to prevent data leakage
     "newbalanceOrig",  # Remove post-transaction features
     "newbalanceDest",  # Remove post-transaction features
@@ -82,6 +82,11 @@ class DataProcessor:
         
         # Data statistics
         self.feature_stats = {}
+        
+        # Feature engineering stats (computed only on training data)
+        self.amount_quantiles = None
+        self.amount_mean = None
+        self.amount_std = None
 
     def load_raw_data(self, sample_size: Optional[int] = None) -> pd.DataFrame:
         """
@@ -475,72 +480,170 @@ class DataProcessor:
         logger.info("Feature preparation completed")
         return df_prepared
 
-    def prepare_train_test_data(
-        self, 
-        df: pd.DataFrame, 
-        test_size: float = 0.2, 
-        val_size: float = 0.1,
-        random_state: int = 42
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+    def prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Split data into training, validation, and test sets.
-        Ensures no data leakage by splitting chronologically.
-
+        Prepare data by cleaning and engineering features.
+        
         Args:
-            df: Processed transaction data
-            test_size: Proportion of data for testing
-            val_size: Proportion of data for validation
-            random_state: Random seed for reproducibility
-
+            df: Raw transaction data
+            
         Returns:
-            Tuple containing X_train, X_val, X_test, y_train, y_val, y_test
+            pd.DataFrame: Prepared data
+        """
+        logger.info("Starting data preparation")
+        
+        # Clean data
+        df_clean = self.clean_data(df)
+        
+        # Basic feature engineering
+        df_featured = self._engineer_basic_features(df_clean)
+        
+        # Save interim data
+        df_featured.to_csv(self.interim_data_dir / "featured_data.csv", index=False)
+        logger.info("Saved featured data to data/interim/featured_data.csv")
+        
+        return df_featured
+
+    def _engineer_basic_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Engineer basic features that don't risk data leakage.
+        
+        Args:
+            df: Cleaned transaction data
+            
+        Returns:
+            pd.DataFrame: Data with engineered features
+        """
+        df_featured = df.copy()
+        
+        # Time-based features
+        df_featured['hour'] = df_featured['step'] % 24
+        df_featured['day'] = (df_featured['step'] // 24) % 7
+        df_featured['is_weekend'] = df_featured['day'].isin([5, 6]).astype(int)
+        df_featured['is_night'] = df_featured['hour'].isin(range(23, 24) + range(0, 6)).astype(int)
+        
+        # Simple transaction features
+        df_featured['zero_org_balance'] = (df_featured['oldbalanceOrg'] == 0).astype(int)
+        df_featured['zero_dest_balance'] = (df_featured['oldbalanceDest'] == 0).astype(int)
+        
+        # One-hot encode transaction type
+        df_featured = pd.get_dummies(df_featured, columns=['type'], prefix='type')
+        
+        return df_featured
+
+    def split_data(
+        self,
+        df: pd.DataFrame,
+        train_size: float = 0.7,
+        val_size: float = 0.1,
+        target_col: str = "is_fraud"
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Split data into train, validation, and test sets using time-based splitting.
+        
+        Args:
+            df: Data to split
+            train_size: Proportion of data to use for training
+            val_size: Proportion of data to use for validation
+            target_col: Name of the target column
+            
+        Returns:
+            Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Train, validation, and test sets
         """
         logger.info("Preparing train/validation/test splits")
         
-        if "is_fraud" not in df.columns:
-            raise ValueError("Target column 'is_fraud' not found in data")
+        # Sort by step to ensure temporal order
+        df_sorted = df.sort_values('step')
         
-        # Sort by step to ensure chronological splitting
-        if "step" in df.columns:
-            df = df.sort_values("step")
-        else:
-            logger.warning("'step' column not found, using random splitting")
+        # Calculate split indices
+        n_samples = len(df_sorted)
+        train_idx = int(n_samples * train_size)
+        val_idx = int(n_samples * (train_size + val_size))
         
-        # Remove columns not needed for modeling
-        cols_to_drop = ["transaction_id", "timestamp"] + COLUMNS_TO_DROP
-        cols_to_drop = [col for col in cols_to_drop if col in df.columns]
+        # Split data
+        train_data = df_sorted.iloc[:train_idx]
+        val_data = df_sorted.iloc[train_idx:val_idx]
+        test_data = df_sorted.iloc[val_idx:]
         
-        # Separate features and target
-        X = df.drop(columns=cols_to_drop + ["is_fraud"])
-        y = df["is_fraud"]
+        # Log split information
+        logger.info(f"Data split into {len(train_data)} training, {len(val_data)} validation, "
+                   f"and {len(test_data)} test samples")
         
-        # Calculate split points
-        n_samples = len(df)
-        test_idx = int(n_samples * (1 - test_size))
-        val_idx = int(test_idx * (1 - val_size))
+        # Log fraud rates
+        train_fraud_rate = train_data[target_col].mean() * 100
+        val_fraud_rate = val_data[target_col].mean() * 100
+        test_fraud_rate = test_data[target_col].mean() * 100
+        logger.info(f"Fraud rates - Train: {train_fraud_rate:.2f}%, "
+                   f"Validation: {val_fraud_rate:.2f}%, Test: {test_fraud_rate:.2f}%")
         
-        # Split chronologically
-        X_train = X[:val_idx]
-        y_train = y[:val_idx]
+        # Save splits
+        train_data.to_csv(self.processed_data_dir / "train_data.csv", index=False)
+        val_data.to_csv(self.processed_data_dir / "val_data.csv", index=False)
+        test_data.to_csv(self.processed_data_dir / "test_data.csv", index=False)
         
-        X_val = X[val_idx:test_idx]
-        y_val = y[val_idx:test_idx]
+        return train_data, val_data, test_data
+
+    def scale_features(
+        self,
+        train_data: pd.DataFrame,
+        val_data: pd.DataFrame,
+        test_data: pd.DataFrame,
+        numerical_features: Optional[List[str]] = None
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Scale numerical features using only training data statistics.
         
-        X_test = X[test_idx:]
-        y_test = y[test_idx:]
+        Args:
+            train_data: Training data
+            val_data: Validation data
+            test_data: Test data
+            numerical_features: List of numerical features to scale
+            
+        Returns:
+            Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Scaled datasets
+        """
+        if numerical_features is None:
+            numerical_features = NUMERICAL_FEATURES
+            
+        # Initialize scaler if not already done
+        if self.scaler is None:
+            self.scaler = StandardScaler()
+            
+        # Fit scaler on training data only
+        self.scaler.fit(train_data[numerical_features])
         
-        logger.info(f"Data split into {len(X_train)} training, {len(X_val)} validation, "
-                   f"and {len(X_test)} test samples")
+        # Transform all datasets
+        train_scaled = train_data.copy()
+        val_scaled = val_data.copy()
+        test_scaled = test_data.copy()
         
-        # Compute class distribution
-        train_fraud_rate = y_train.mean()
-        val_fraud_rate = y_val.mean()
-        test_fraud_rate = y_test.mean()
+        train_scaled[numerical_features] = self.scaler.transform(train_data[numerical_features])
+        val_scaled[numerical_features] = self.scaler.transform(val_data[numerical_features])
+        test_scaled[numerical_features] = self.scaler.transform(test_data[numerical_features])
         
-        logger.info(f"Fraud rates - Train: {train_fraud_rate:.2%}, "
-                   f"Validation: {val_fraud_rate:.2%}, Test: {test_fraud_rate:.2%}")
+        return train_scaled, val_scaled, test_scaled
+
+    def save_feature_stats(self, train_data: pd.DataFrame) -> None:
+        """
+        Save feature statistics computed from training data.
         
-        return X_train, X_val, X_test, y_train, y_val, y_test
+        Args:
+            train_data: Training data
+        """
+        # Calculate correlation with fraud
+        correlations = train_data.corr()['is_fraud'].sort_values(ascending=False)
+        
+        # Save statistics
+        self.feature_stats = {
+            "correlation_with_fraud": correlations.to_dict(),
+            "feature_names": train_data.columns.tolist()
+        }
+        
+        # Save to file
+        with open(self.processed_data_dir / "feature_stats.json", "w") as f:
+            json.dump(self.feature_stats, f, indent=2)
+            
+        logger.info("Saved feature statistics to data/processed/feature_stats.json")
 
     def process_data_pipeline(
         self, 
@@ -596,31 +699,27 @@ class DataProcessor:
             logger.info(f"Saved prepared data to {processed_path}")
             
             # Save feature stats
-            stats_path = self.processed_data_dir / "feature_stats.json"
-            with open(stats_path, "w") as f:
-                import json
-                json.dump(self.feature_stats, f, indent=2)
-            logger.info(f"Saved feature statistics to {stats_path}")
+            self.save_feature_stats(prepared_df)
         
         # Split into train/validation/test sets
-        splits = self.prepare_train_test_data(
-            prepared_df, test_size=test_size, val_size=val_size, random_state=random_state
+        splits = self.split_data(
+            prepared_df, test_size=test_size, val_size=val_size, target_col="is_fraud"
         )
         
         # Save splits if requested
         if save_processed:
-            X_train, X_val, X_test, y_train, y_val, y_test = splits
+            X_train, X_val, X_test = splits
             
             train_path = self.processed_data_dir / "train_data.csv"
-            pd.concat([X_train, y_train], axis=1).to_csv(train_path, index=False)
+            pd.concat([X_train, X_train.iloc[:, -1]], axis=1).to_csv(train_path, index=False)
             logger.info(f"Saved training data to {train_path}")
             
             val_path = self.processed_data_dir / "val_data.csv"
-            pd.concat([X_val, y_val], axis=1).to_csv(val_path, index=False)
+            pd.concat([X_val, X_val.iloc[:, -1]], axis=1).to_csv(val_path, index=False)
             logger.info(f"Saved validation data to {val_path}")
             
             test_path = self.processed_data_dir / "test_data.csv"
-            pd.concat([X_test, y_test], axis=1).to_csv(test_path, index=False)
+            pd.concat([X_test, X_test.iloc[:, -1]], axis=1).to_csv(test_path, index=False)
             logger.info(f"Saved test data to {test_path}")
         
         logger.info("Data processing pipeline completed successfully")
@@ -657,13 +756,62 @@ class DataProcessor:
         
         return df_prepared.values
 
+    def process_training_data(self) -> pd.DataFrame:
+        """
+        Load and process the training data.
+
+        Returns:
+            pd.DataFrame: Processed training data ready for model training
+        """
+        logger.info("Processing training data")
+        
+        # Load raw data
+        df = self.load_raw_data()
+        
+        # Clean data
+        df_clean = self.clean_data(df)
+        
+        # Drop unnecessary columns
+        df_clean = df_clean.drop(columns=COLUMNS_TO_DROP, errors='ignore')
+        
+        # Extract time features if timestamp exists
+        if 'timestamp' in df_clean.columns:
+            df_clean = self.extract_time_features(df_clean)
+        
+        # Encode categorical features
+        for cat_feature in CATEGORICAL_FEATURES:
+            if cat_feature in df_clean.columns:
+                encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+                encoded_features = encoder.fit_transform(df_clean[[cat_feature]])
+                feature_names = [f"{cat_feature}_{val}" for val in encoder.categories_[0]]
+                encoded_df = pd.DataFrame(encoded_features, columns=feature_names)
+                df_clean = pd.concat([df_clean.drop(columns=[cat_feature]), encoded_df], axis=1)
+                self.categorical_encoders[cat_feature] = encoder
+        
+        # Scale numerical features
+        if not self.scaler:
+            self.scaler = StandardScaler()
+            scaled_features = self.scaler.fit_transform(df_clean[NUMERICAL_FEATURES])
+        else:
+            scaled_features = self.scaler.transform(df_clean[NUMERICAL_FEATURES])
+        
+        scaled_df = pd.DataFrame(scaled_features, columns=NUMERICAL_FEATURES)
+        df_clean[NUMERICAL_FEATURES] = scaled_df
+        
+        # Ensure target variable is properly named
+        if 'isFraud' in df_clean.columns:
+            df_clean = df_clean.rename(columns={'isFraud': 'fraud'})
+        
+        logger.info(f"Processed training data shape: {df_clean.shape}")
+        return df_clean
+
 
 if __name__ == "__main__":
     # Example usage
     processor = DataProcessor()
     
     # Process the full dataset
-    X_train, X_val, X_test, y_train, y_val, y_test = processor.process_data_pipeline(
+    X_train, X_val, X_test = processor.process_data_pipeline(
         sample_size=None,  # Use the full dataset
         save_processed=True
     )

@@ -38,6 +38,8 @@ class FraudEDA:
             "oldbalanceDest", "newbalanceDest"
         ]
         self.categorical_features = ["type"]
+        self.high_cardinality_features = ["nameOrig", "nameDest"]
+        self.binary_features = ["isFlaggedFraud"]
         self.time_features = ["step"]
         
     def load_data(self) -> None:
@@ -64,97 +66,163 @@ class FraudEDA:
         if duplicates > 0:
             logger.warning(f"Found {duplicates} duplicate transactions")
             
-    def univariate_analysis(self) -> Dict:
+    def calculate_effect_size(self, p1: float, p2: float) -> float:
         """
-        Perform univariate analysis on all features.
+        Calculate Cohen's h effect size for proportions.
+        
+        Args:
+            p1: First proportion
+            p2: Second proportion
+            
+        Returns:
+            Cohen's h effect size
+        """
+        return 2 * np.arcsin(np.sqrt(p1)) - 2 * np.arcsin(np.sqrt(p2))
+    
+    def calculate_information_value(self, feature: str, target: str) -> float:
+        """
+        Calculate Information Value (IV) for a feature.
+        
+        Args:
+            feature: Feature name
+            target: Target variable name
+            
+        Returns:
+            Information Value
+        """
+        # For numerical features, create bins
+        if feature in self.numerical_features:
+            # Create 10 bins, handling duplicate values
+            self.df[f'{feature}_bin'] = pd.qcut(self.df[feature], q=10, labels=False, duplicates='drop')
+            feature = f'{feature}_bin'
+        
+        # Calculate WOE and IV
+        woe = np.log((self.df[self.df[target] == 1][feature].value_counts() / self.df[self.df[target] == 1][feature].count()) /
+                    (self.df[self.df[target] == 0][feature].value_counts() / self.df[self.df[target] == 0][feature].count()))
+        iv = ((self.df[self.df[target] == 1][feature].value_counts() / self.df[self.df[target] == 1][feature].count()) -
+              (self.df[self.df[target] == 0][feature].value_counts() / self.df[self.df[target] == 0][feature].count())) * woe
+        
+        return iv.sum()
+    
+    def analyze_population_patterns(self) -> Dict:
+        """
+        Analyze patterns in the population data.
         
         Returns:
             Dictionary containing analysis results
         """
         results = {}
         
-        # Numerical features analysis
-        for feature in self.numerical_features:
-            stats_dict = {
-                "mean": self.df[feature].mean(),
-                "median": self.df[feature].median(),
-                "std": self.df[feature].std(),
-                "min": self.df[feature].min(),
-                "max": self.df[feature].max(),
-                "q1": self.df[feature].quantile(0.25),
-                "q3": self.df[feature].quantile(0.75)
+        # 1. Overall Statistics
+        results['overall'] = {
+            'total_transactions': len(self.df),
+            'fraud_rate': self.df['isFraud'].mean(),
+            'fraud_count': self.df['isFraud'].sum()
+        }
+        
+        # 2. Transaction Type Analysis
+        type_analysis = {}
+        overall_fraud_rate = self.df['isFraud'].mean()
+        for type_ in self.df['type'].unique():
+            type_data = self.df[self.df['type'] == type_]
+            fraud_rate = type_data['isFraud'].mean()
+            risk_ratio = fraud_rate / overall_fraud_rate
+            effect_size = self.calculate_effect_size(fraud_rate, overall_fraud_rate)
+            type_analysis[type_] = {
+                'fraud_rate': fraud_rate,
+                'risk_ratio': risk_ratio,
+                'effect_size': effect_size,
+                'transaction_count': len(type_data),
+                'fraud_count': type_data['isFraud'].sum()
             }
-            results[feature] = stats_dict
+        results['transaction_types'] = type_analysis
+        
+        # 3. Numerical Features Analysis
+        for feature in self.numerical_features:
+            fraud_values = self.df[self.df['isFraud'] == 1][feature]
+            legit_values = self.df[self.df['isFraud'] == 0][feature]
+            
+            results[feature] = {
+                'fraud': {
+                    'mean': fraud_values.mean(),
+                    'median': fraud_values.median(),
+                    'std': fraud_values.std(),
+                    'q1': fraud_values.quantile(0.25),
+                    'q3': fraud_values.quantile(0.75)
+                },
+                'legitimate': {
+                    'mean': legit_values.mean(),
+                    'median': legit_values.median(),
+                    'std': legit_values.std(),
+                    'q1': legit_values.quantile(0.25),
+                    'q3': legit_values.quantile(0.75)
+                },
+                'differences': {
+                    'mean_difference': fraud_values.mean() - legit_values.mean(),
+                    'variance_ratio': fraud_values.var() / legit_values.var(),
+                    'information_value': self.calculate_information_value(feature, 'isFraud')
+                }
+            }
             
             # Create distribution plot
-            plt.figure(figsize=(10, 6))
-            sns.histplot(data=self.df, x=feature, bins=50)
-            plt.title(f"Distribution of {feature}")
-            plt.savefig(f"data/processed/eda/{feature}_distribution.png")
+            plt.figure(figsize=(12, 6))
+            # Convert isFraud to string category for better plotting
+            plot_df = self.df.copy()
+            plot_df['isFraud'] = plot_df['isFraud'].map({0: 'Legitimate', 1: 'Fraud'})
+            sns.boxplot(data=plot_df, x='isFraud', y=feature)
+            plt.title(f'Distribution of {feature} by Fraud Status')
+            plt.savefig(f'data/processed/eda/{feature}_fraud_distribution.png')
             plt.close()
-            
-        # Categorical features analysis
-        for feature in self.categorical_features:
-            value_counts = self.df[feature].value_counts()
-            results[feature] = {
-                "value_counts": value_counts.to_dict(),
-                "proportions": (value_counts / len(self.df)).to_dict()
-            }
-            
-            # Create bar plot
-            plt.figure(figsize=(10, 6))
-            sns.countplot(data=self.df, x=feature)
-            plt.title(f"Distribution of {feature}")
-            plt.xticks(rotation=45)
-            plt.savefig(f"data/processed/eda/{feature}_distribution.png")
-            plt.close()
-            
-        return results
-    
-    def bivariate_analysis(self) -> Dict:
-        """
-        Perform bivariate analysis between features and fraud.
         
-        Returns:
-            Dictionary containing analysis results
-        """
-        results = {}
-        
-        # Feature-fraud correlations
-        numerical_correlations = self.df[self.numerical_features].corrwith(self.df["isFraud"])
-        results["numerical_correlations"] = numerical_correlations.to_dict()
-        
-        # Create correlation heatmap
-        plt.figure(figsize=(12, 8))
-        sns.heatmap(self.df[self.numerical_features + ["isFraud"]].corr(),
-                   annot=True, cmap="coolwarm", center=0)
-        plt.title("Correlation Heatmap")
-        plt.savefig("data/processed/eda/correlation_heatmap.png")
-        plt.close()
-        
-        # Categorical feature analysis
-        for feature in self.categorical_features:
-            # Chi-square test
-            contingency_table = pd.crosstab(self.df[feature], self.df["isFraud"])
-            chi2, p_value = stats.chi2_contingency(contingency_table)[:2]
+        # 4. High Cardinality Features Analysis
+        for feature in self.high_cardinality_features:
+            # Analyze top 10 most frequent values
+            top_10_values = self.df[feature].value_counts().head(10).index
+            value_analysis = {}
             
-            # Calculate fraud rates by category
-            fraud_rates = self.df.groupby(feature)["isFraud"].mean()
+            for value in top_10_values:
+                value_data = self.df[self.df[feature] == value]
+                fraud_rate = value_data['isFraud'].mean()
+                risk_ratio = fraud_rate / overall_fraud_rate
+                effect_size = self.calculate_effect_size(fraud_rate, overall_fraud_rate)
+                value_analysis[value] = {
+                    'fraud_rate': fraud_rate,
+                    'risk_ratio': risk_ratio,
+                    'effect_size': effect_size,
+                    'transaction_count': len(value_data),
+                    'fraud_count': value_data['isFraud'].sum()
+                }
             
-            results[feature] = {
-                "chi2": chi2,
-                "p_value": p_value,
-                "fraud_rates": fraud_rates.to_dict()
-            }
+            results[feature] = value_analysis
+        
+        # 5. Binary Features Analysis
+        for feature in self.binary_features:
+            value_analysis = {}
+            for value in self.df[feature].unique():
+                value_data = self.df[self.df[feature] == value]
+                fraud_rate = value_data['isFraud'].mean()
+                risk_ratio = fraud_rate / overall_fraud_rate
+                effect_size = self.calculate_effect_size(fraud_rate, overall_fraud_rate)
+                value_analysis[value] = {
+                    'fraud_rate': fraud_rate,
+                    'risk_ratio': risk_ratio,
+                    'effect_size': effect_size,
+                    'transaction_count': len(value_data),
+                    'fraud_count': value_data['isFraud'].sum()
+                }
+            
+            results[feature] = value_analysis
             
             # Create fraud rate plot
             plt.figure(figsize=(10, 6))
-            fraud_rates.plot(kind="bar")
-            plt.title(f"Fraud Rates by {feature}")
-            plt.xticks(rotation=45)
-            plt.savefig(f"data/processed/eda/{feature}_fraud_rates.png")
+            plot_df = self.df.copy()
+            # Convert binary feature values to strings for better plotting
+            plot_df[feature] = plot_df[feature].astype(str)
+            sns.barplot(data=plot_df, x=feature, y='isFraud')
+            plt.title(f'Fraud Rates by {feature}')
+            plt.savefig(f'data/processed/eda/{feature}_fraud_rates.png')
             plt.close()
-            
+        
         return results
     
     def time_series_analysis(self) -> Dict:
@@ -199,6 +267,62 @@ class FraudEDA:
         
         return results
     
+    def analyze_false_negatives(self) -> Dict:
+        """
+        Analyze false negatives in fraud detection.
+        
+        Returns:
+            Dictionary containing false negative analysis results
+        """
+        results = {}
+        
+        # 1. System Flag Analysis (isFlaggedFraud vs isFraud)
+        confusion = pd.crosstab(self.df['isFlaggedFraud'], self.df['isFraud'])
+        total_fraud = self.df['isFraud'].sum()
+        
+        # False negatives are fraud cases (isFraud=1) that weren't flagged (isFlaggedFraud=0)
+        false_negatives = confusion.loc[0, 1] if 1 in confusion.columns else 0
+        false_negative_rate = false_negatives / total_fraud if total_fraud > 0 else 0
+        
+        results['system_flags'] = {
+            'total_fraud_cases': int(total_fraud),
+            'false_negatives': int(false_negatives),
+            'false_negative_rate': float(false_negative_rate),
+            'missed_fraud_amount': float(self.df[(self.df['isFraud'] == 1) & 
+                                               (self.df['isFlaggedFraud'] == 0)]['amount'].sum())
+        }
+        
+        # 2. Analysis by Transaction Type
+        type_analysis = {}
+        for type_ in self.df['type'].unique():
+            type_data = self.df[self.df['type'] == type_]
+            type_fraud = type_data['isFraud'].sum()
+            type_false_neg = len(type_data[(type_data['isFraud'] == 1) & 
+                                         (type_data['isFlaggedFraud'] == 0)])
+            
+            type_analysis[type_] = {
+                'total_fraud': int(type_fraud),
+                'false_negatives': int(type_false_neg),
+                'false_negative_rate': float(type_false_neg / type_fraud) if type_fraud > 0 else 0,
+                'missed_fraud_amount': float(type_data[(type_data['isFraud'] == 1) & 
+                                                     (type_data['isFlaggedFraud'] == 0)]['amount'].sum())
+            }
+        
+        results['by_type'] = type_analysis
+        
+        # 3. Amount Range Analysis for False Negatives
+        false_neg_data = self.df[(self.df['isFraud'] == 1) & (self.df['isFlaggedFraud'] == 0)]
+        
+        results['amount_analysis'] = {
+            'min': float(false_neg_data['amount'].min()) if not false_neg_data.empty else 0,
+            'max': float(false_neg_data['amount'].max()) if not false_neg_data.empty else 0,
+            'mean': float(false_neg_data['amount'].mean()) if not false_neg_data.empty else 0,
+            'median': float(false_neg_data['amount'].median()) if not false_neg_data.empty else 0,
+            'total': float(false_neg_data['amount'].sum()) if not false_neg_data.empty else 0
+        }
+        
+        return results
+    
     def run_full_analysis(self) -> Dict:
         """
         Run all EDA analyses and save results.
@@ -214,9 +338,9 @@ class FraudEDA:
         
         # Run all analyses
         results = {
-            "univariate": self.univariate_analysis(),
-            "bivariate": self.bivariate_analysis(),
-            "time_series": self.time_series_analysis()
+            "population_analysis": self.analyze_population_patterns(),
+            "time_series": self.time_series_analysis(),
+            "false_negatives": self.analyze_false_negatives()
         }
         
         # Save results to JSON
@@ -235,12 +359,23 @@ if __name__ == "__main__":
     
     # Print key findings
     print("\nKey Findings:")
-    print("1. Most important features for fraud detection:")
-    correlations = results["bivariate"]["numerical_correlations"]
-    for feature, corr in sorted(correlations.items(), key=lambda x: abs(x[1]), reverse=True)[:5]:
-        print(f"   - {feature}: {corr:.3f}")
-        
-    print("\n2. Transaction types with highest fraud rates:")
-    fraud_rates = results["bivariate"]["type"]["fraud_rates"]
-    for type_, rate in sorted(fraud_rates.items(), key=lambda x: x[1], reverse=True):
-        print(f"   - {type_}: {rate:.2%}") 
+    print("1. Overall Statistics:")
+    overall = results["population_analysis"]["overall"]
+    print(f"   - Total Transactions: {overall['total_transactions']:,}")
+    print(f"   - Overall Fraud Rate: {overall['fraud_rate']:.2%}")
+    
+    print("\n2. Transaction Types with Highest Risk:")
+    type_analysis = results["population_analysis"]["transaction_types"]
+    for type_, stats in sorted(type_analysis.items(), key=lambda x: x[1]['risk_ratio'], reverse=True):
+        print(f"   - {type_}:")
+        print(f"     Risk Ratio: {stats['risk_ratio']:.2f}")
+        print(f"     Fraud Rate: {stats['fraud_rate']:.2%}")
+        print(f"     Effect Size: {stats['effect_size']:.3f}")
+    
+    print("\n3. Most Important Numerical Features:")
+    for feature in eda.numerical_features:
+        feature_stats = results["population_analysis"][feature]["differences"]
+        print(f"   - {feature}:")
+        print(f"     Information Value: {feature_stats['information_value']:.3f}")
+        print(f"     Mean Difference: {feature_stats['mean_difference']:.2f}")
+        print(f"     Variance Ratio: {feature_stats['variance_ratio']:.2f}") 

@@ -17,7 +17,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.model_selection import cross_val_score
 
 from fraud_detection.database.supabase_client import SupabaseClient
-from .ml_tracker import MLTracker
+from fraud_detection.models.ml_tracker import MLTracker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

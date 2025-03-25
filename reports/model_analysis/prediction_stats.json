@@ -1,0 +1,12 @@
+{
+    "total_samples": 1272524,
+    "fraud_samples": 4254,
+    "predicted_fraud": 4196,
+    "true_positives": 3525,
+    "false_positives": 671,
+    "true_negatives": 1267599,
+    "false_negatives": 729,
+    "precision": 0.8400857959961868,
+    "recall": 0.8286318758815233,
+    "f1_score": 0.834319526627219
+}

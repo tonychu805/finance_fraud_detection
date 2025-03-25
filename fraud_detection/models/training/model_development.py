@@ -15,11 +15,11 @@ from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV
 
-from .config.model_config import ModelConfig
-from .models.model_registry import ModelRegistry
-from .evaluation.metrics import MetricsCalculator
-from .utils.result_storage import ResultStorage
-from .supabase_client import SupabaseClient
+from fraud_detection.models.config import ModelConfig
+from fraud_detection.models.registry import ModelRegistry
+from fraud_detection.models.evaluation.metrics import MetricsCalculator
+from fraud_detection.utils.result_storage import ResultStorage
+from fraud_detection.database.supabase_client import SupabaseClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

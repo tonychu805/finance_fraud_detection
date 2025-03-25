@@ -1,101 +1,89 @@
 # Fraud Detection System
 
-*** This project was developed with the assistance of Claude 3.7 - Sonnet. 
+# This project is partly assisted by Anthropic Claude 3.7 Sonnet
 
-A comprehensive solution for detecting financial fraud using machine learning.
+## Overview
+A machine learning system for detecting fraudulent financial transactions using ensemble methods. The system employs LightGBM and Random Forest models with probability calibration to provide high-accuracy fraud detection with explainable predictions.
 
-## Project Structure
+## Features
+- Real-time fraud detection
+- Batch processing capabilities
+- Probability calibration for better decision thresholds
+- Comprehensive API with webhook support
+- Detailed monitoring and logging
+- Production-ready deployment options
 
-```
-fraud_detection/
-├── fraud_detection/          # Main package
-│   ├── core/                # Core functionality
-│   │   └── data_processor.py
-│   ├── models/             # Model-related code
-│   │   ├── model_manager.py
-│   │   ├── model_trainer.py
-│   │   └── ml_tracker.py
-│   ├── database/           # Database operations
-│   │   └── supabase_client.py
-│   └── api/                # API-related code
-│       └── app.py
-├── tests/                  # Test suite
-│   ├── unit/
-│   └── integration/
-├── config/                 # Configuration files
-│   ├── dev/
-│   └── prod/
-├── docs/                   # Documentation
-│   ├── api/
-│   ├── user_guide/
-│   ├── development/
-│   └── deployment/
-├── notebooks/             # Jupyter notebooks
-├── scripts/              # Utility scripts
-└── data/                 # Data directory
-    ├── raw/
-    └── processed/
-```
+## Quick Start
 
-## Setup
-
-1. Clone the repository:
+### Installation
 ```bash
-git clone https://github.com/yourusername/fraud_detection.git
-cd fraud_detection
-```
+# Clone repository
+git clone https://github.com/your-username/fraud-detection.git
+cd fraud-detection
 
-2. Create a virtual environment:
-```bash
+# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-3. Install dependencies:
-```bash
-pip install -e ".[dev]"  # Installs package in development mode with dev dependencies
+### Basic Usage
+```python
+from fraud_detection import FraudDetector
+
+# Initialize detector
+detector = FraudDetector()
+
+# Check a transaction
+result = detector.check_transaction({
+    "amount": 1000.00,
+    "type": "online",
+    "merchant": "retail",
+    "zip": "10001"
+})
+
+print(f"Prediction: {result.prediction}")
+print(f"Confidence: {result.confidence}")
 ```
 
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
+## Model Performance
+Current model performance metrics (v1.0.0):
 
-## Development
+- **LightGBM**:
+  - F1 Score: 0.7292 (threshold: 0.2071)
+  - ROC AUC: 0.9961
 
-### Running Tests
-```bash
-pytest
-```
-
-### Code Quality
-```bash
-black .
-isort .
-mypy .
-flake8 .
-```
-
-### Running the API
-```bash
-uvicorn fraud_detection.api.app:app --reload
-```
+- **Random Forest**:
+  - F1 Score: 0.7567 (threshold: 0.0994)
+  - ROC AUC: 0.9971
 
 ## Documentation
+For detailed documentation, please visit our [Documentation Hub](docs/README.md):
 
-Detailed documentation is available in the `docs/` directory:
-- API Documentation: `docs/api/`
-- User Guide: `docs/user_guide/`
-- Development Guide: `docs/development/`
-- Deployment Guide: `docs/deployment/`
+- [Getting Started Guide](docs/guides/getting_started.md)
+- [API Documentation](docs/api/overview.md)
+- [Model Details](docs/technical/MODEL.md)
+- [Development Guide](docs/technical/DEVELOPMENT.md)
+- [Operations Guide](docs/technical/OPERATIONS.md)
+
+## Development Status
+- Current Version: v1.0.0
+- Next Milestone: v1.1.0 (Q2 2024)
+- See our [Roadmap](docs/reference/ROADMAP.md) for future plans
+- Track changes in our [Changelog](docs/reference/CHANGELOG.md)
+
+## Contributing
+We welcome contributions! Please read our [Development Guide](docs/technical/DEVELOPMENT.md#contributing) for guidelines.
 
 ## License
+[Add License Information]
 
-MIT License
-
-## Support
-
-For support and questions, please [open an issue](https://github.com/yourusername/finance_fraud_detection/issues) or contact the maintainers.
+## Contact
+- Team: Fraud Detection
+- Email: [Add Contact Email]
+- Support: [Documentation](docs/guides/troubleshooting.md)
+- Community: [Discord](https://discord.gg/fraud-detection)
 
 ---
