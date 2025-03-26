@@ -1,17 +1,7 @@
 """
-Fraud Detection Core Package
+Fraud detection package.
 
-Contains the core functionality for fraud detection.
+This package provides tools and models for detecting fraudulent transactions.
 """
-
-from fraud_detection.models import *
-from fraud_detection.core import *
-from fraud_detection.utils import *
-
-__all__ = [
-    "models",
-    "core",
-    "utils"
-]
 
 __version__ = '0.1.0' 
