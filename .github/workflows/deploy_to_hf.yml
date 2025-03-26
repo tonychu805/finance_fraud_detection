@@ -33,4 +33,4 @@ jobs:
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        python scripts/deploy_to_hf.py 
+        python -m fraud_detection.models.deployment.deploy_to_hf 

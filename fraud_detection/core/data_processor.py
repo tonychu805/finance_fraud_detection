@@ -431,20 +431,11 @@ class DataProcessor:
         logger.info("Numerical scaling completed")
         return df_scaled
 
-    def prepare_features(self, df: pd.DataFrame, training: bool = True) -> pd.DataFrame:
-        """
-        Prepare final feature set for model training or inference.
-
-        Args:
-            df: Processed transaction data
-            training: Whether this is for training (True) or inference (False)
-
-        Returns:
-            pd.DataFrame: Data with final prepared features
-        """
+    def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Prepare final features for modeling."""
         logger.info("Preparing final features")
         
-        # Make a copy
+        # Make a copy to avoid modifying the original
         df_prepared = df.copy()
         
         # Drop unnecessary columns
@@ -454,31 +445,55 @@ class DataProcessor:
         if "isFraud" in df_prepared.columns:
             df_prepared = df_prepared.rename(columns={"isFraud": "is_fraud"})
         
+        # Separate features and target
+        target_col = "is_fraud"
+        if target_col in df_prepared.columns:
+            features = df_prepared.drop(columns=[target_col])
+            target = df_prepared[target_col]
+        else:
+            features = df_prepared
+            target = None
+        
         # Encode categorical features
-        df_prepared = self.encode_categorical_features(df_prepared, fit=training)
+        logger.info("Encoding categorical features")
+        categorical_features = features.select_dtypes(include=['object']).columns
+        for col in categorical_features:
+            features[col] = features[col].astype('category').cat.codes
+        logger.info("Categorical encoding completed")
         
         # Scale numerical features
-        df_prepared = self.scale_numerical_features(df_prepared, fit=training)
+        logger.info("Scaling numerical features")
+        numerical_features = features.select_dtypes(include=['float64', 'int64']).columns
+        scaler = StandardScaler()
+        features[numerical_features] = scaler.fit_transform(features[numerical_features])
+        logger.info("Numerical scaling completed")
         
-        # For training data, we compute feature statistics
-        if training and "is_fraud" in df_prepared.columns:
-            # Get numeric columns only for correlation
-            numeric_cols = df_prepared.select_dtypes(include=[np.number]).columns
-            df_numeric = df_prepared[numeric_cols]
+        # Calculate feature correlations with target if available
+        if target is not None:
+            correlations = features.corrwith(target).sort_values(ascending=False)
+            top_correlations = correlations.head(10).to_dict()
+            logger.info(f"Top correlated features with fraud: {top_correlations}")
             
-            if "is_fraud" in df_numeric.columns:
-                corr_with_fraud = df_numeric.corrwith(df_numeric["is_fraud"]).abs().sort_values(ascending=False)
-                self.feature_stats["correlation_with_fraud"] = corr_with_fraud.to_dict()
-                logger.info(f"Top correlated features with fraud: {corr_with_fraud.head(5).to_dict()}")
-            
-            # Store feature names for later use
-            self.feature_stats["feature_names"] = [
-                col for col in df_prepared.columns 
-                if col != "is_fraud"
-            ]
+            # Save feature statistics
+            feature_stats = {
+                'correlations': correlations.to_dict(),
+                'top_correlations': top_correlations
+            }
+            with open(self.processed_data_dir / "feature_stats.json", 'w') as f:
+                json.dump(feature_stats, f, indent=4)
+            logger.info("Saved feature statistics to data/processed/feature_stats.json")
         
+        # Combine features and target back if target exists
+        if target is not None:
+            prepared_data = pd.concat([features, target], axis=1)
+        else:
+            prepared_data = features
+        
+        # Save prepared data
+        prepared_data.to_csv(self.processed_data_dir / "prepared_data.csv", index=False)
         logger.info("Feature preparation completed")
-        return df_prepared
+        
+        return prepared_data
 
     def prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -539,7 +554,7 @@ class DataProcessor:
         target_col: str = "is_fraud"
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
-        Split data into train, validation, and test sets using time-based splitting.
+        Split data into train, validation, and test sets using pure time-based splitting.
         
         Args:
             df: Data to split
@@ -550,31 +565,34 @@ class DataProcessor:
         Returns:
             Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Train, validation, and test sets
         """
-        logger.info("Preparing train/validation/test splits")
+        logger.info("Preparing train/validation/test splits using time-based approach")
         
         # Sort by step to ensure temporal order
-        df_sorted = df.sort_values('step')
+        df = df.sort_values('step')
         
-        # Calculate split indices
-        n_samples = len(df_sorted)
+        # Calculate split indices based on number of samples
+        n_samples = len(df)
         train_idx = int(n_samples * train_size)
         val_idx = int(n_samples * (train_size + val_size))
         
-        # Split data
-        train_data = df_sorted.iloc[:train_idx]
-        val_data = df_sorted.iloc[train_idx:val_idx]
-        test_data = df_sorted.iloc[val_idx:]
+        # Split data temporally
+        train_data = df.iloc[:train_idx].copy()
+        val_data = df.iloc[train_idx:val_idx].copy()
+        test_data = df.iloc[val_idx:].copy()
         
-        # Log split information
+        # Log split information and fraud rates
         logger.info(f"Data split into {len(train_data)} training, {len(val_data)} validation, "
                    f"and {len(test_data)} test samples")
         
-        # Log fraud rates
-        train_fraud_rate = train_data[target_col].mean() * 100
-        val_fraud_rate = val_data[target_col].mean() * 100
-        test_fraud_rate = test_data[target_col].mean() * 100
-        logger.info(f"Fraud rates - Train: {train_fraud_rate:.2f}%, "
-                   f"Validation: {val_fraud_rate:.2f}%, Test: {test_fraud_rate:.2f}%")
+        # Log fraud rates for each split
+        train_fraud_rate = train_data[target_col].mean()
+        val_fraud_rate = val_data[target_col].mean()
+        test_fraud_rate = test_data[target_col].mean()
+        
+        logger.info(f"Fraud rates:")
+        logger.info(f"Training: {train_fraud_rate:.4f} ({train_fraud_rate*100:.2f}%)")
+        logger.info(f"Validation: {val_fraud_rate:.4f} ({val_fraud_rate*100:.2f}%)")
+        logger.info(f"Test: {test_fraud_rate:.4f} ({test_fraud_rate*100:.2f}%)")
         
         # Save splits
         train_data.to_csv(self.processed_data_dir / "train_data.csv", index=False)
@@ -690,7 +708,7 @@ class DataProcessor:
             logger.info(f"Saved featured data to {interim_path}")
         
         # Prepare final features
-        prepared_df = self.prepare_features(featured_df, training=True)
+        prepared_df = self.prepare_features(featured_df)
         
         # Save processed data if requested
         if save_processed:
@@ -702,28 +720,39 @@ class DataProcessor:
             self.save_feature_stats(prepared_df)
         
         # Split into train/validation/test sets
-        splits = self.split_data(
-            prepared_df, test_size=test_size, val_size=val_size, target_col="is_fraud"
+        train_data, val_data, test_data = self.split_data(
+            prepared_df, 
+            train_size=0.7,  # Fixed proportions
+            val_size=0.1,
+            target_col="is_fraud"
         )
+        
+        # Separate features and target
+        X_train = train_data.drop(columns=["is_fraud"])
+        y_train = train_data["is_fraud"]
+        
+        X_val = val_data.drop(columns=["is_fraud"])
+        y_val = val_data["is_fraud"]
+        
+        X_test = test_data.drop(columns=["is_fraud"])
+        y_test = test_data["is_fraud"]
         
         # Save splits if requested
         if save_processed:
-            X_train, X_val, X_test = splits
-            
             train_path = self.processed_data_dir / "train_data.csv"
-            pd.concat([X_train, X_train.iloc[:, -1]], axis=1).to_csv(train_path, index=False)
+            pd.concat([X_train, y_train], axis=1).to_csv(train_path, index=False)
             logger.info(f"Saved training data to {train_path}")
             
             val_path = self.processed_data_dir / "val_data.csv"
-            pd.concat([X_val, X_val.iloc[:, -1]], axis=1).to_csv(val_path, index=False)
+            pd.concat([X_val, y_val], axis=1).to_csv(val_path, index=False)
             logger.info(f"Saved validation data to {val_path}")
             
             test_path = self.processed_data_dir / "test_data.csv"
-            pd.concat([X_test, X_test.iloc[:, -1]], axis=1).to_csv(test_path, index=False)
+            pd.concat([X_test, y_test], axis=1).to_csv(test_path, index=False)
             logger.info(f"Saved test data to {test_path}")
         
         logger.info("Data processing pipeline completed successfully")
-        return splits
+        return X_train, X_val, X_test, y_train, y_val, y_test
 
     def preprocess_transaction(self, transaction: Dict) -> np.ndarray:
         """
@@ -741,7 +770,7 @@ class DataProcessor:
         # Apply the same preprocessing as during training
         df_cleaned = self.clean_data(df)
         df_featured = self.engineer_features(df_cleaned)
-        df_prepared = self.prepare_features(df_featured, training=False)
+        df_prepared = self.prepare_features(df_featured)
         
         # Select only the columns that were used during training
         if "feature_names" in self.feature_stats:
@@ -811,7 +840,7 @@ if __name__ == "__main__":
     processor = DataProcessor()
     
     # Process the full dataset
-    X_train, X_val, X_test = processor.process_data_pipeline(
+    X_train, X_val, X_test, y_train, y_val, y_test = processor.process_data_pipeline(
         sample_size=None,  # Use the full dataset
         save_processed=True
     )
