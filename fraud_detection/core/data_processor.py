@@ -15,6 +15,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import json
+from imblearn.over_sampling import SMOTE
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,7 @@ CATEGORICAL_FEATURES = [
 NUMERICAL_FEATURES = [
     "amount",
     "oldbalanceOrg",
+    "newbalanceOrig",  # Added based on high IV (1.277)
     "oldbalanceDest",
 ]
 
@@ -45,8 +47,7 @@ COLUMNS_TO_DROP = [
     "nameOrig",
     "nameDest",
     "isFlaggedFraud",  # Remove this to prevent data leakage
-    "newbalanceOrig",  # Remove post-transaction features
-    "newbalanceDest",  # Remove post-transaction features
+    "newbalanceDest",  # Low IV (0.078) and less predictive
 ]
 
 class DataProcessor:
@@ -275,40 +276,78 @@ class DataProcessor:
 
     def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Engineer additional features for fraud detection.
-        Only uses information available at transaction time.
+        Engineer new features from existing ones.
 
         Args:
-            df: Cleaned transaction data
+            df: DataFrame with raw features
 
         Returns:
-            pd.DataFrame: Data with engineered features
+            pd.DataFrame: DataFrame with additional engineered features
         """
-        logger.info("Engineering additional features")
+        logger.info("Engineering new features")
+        df_engineered = df.copy()
+
+        # 1. Transaction Amount Ratios (with safe division)
+        df_engineered["amount_to_balance_ratio"] = np.where(
+            df_engineered["oldbalanceOrg"] != 0,
+            df_engineered["amount"] / df_engineered["oldbalanceOrg"],
+            1.0  # Default value when denominator is 0
+        )
         
-        # Make a copy to avoid modifying the original
-        df_features = df.copy()
+        # 2. Time-based Features
+        df_engineered["hour"] = df_engineered["step"] % 24
+        df_engineered["day"] = df_engineered["step"] // 24
+        df_engineered["is_high_risk_hour"] = df_engineered["hour"].isin([21, 22, 23]).astype(int)
+        df_engineered["is_high_risk_day"] = df_engineered["day"].isin([2, 17, 18, 25, 26, 29]).astype(int)
         
-        # Calculate transaction amount ratio to balance
-        df_features["amount_to_org_balance_ratio"] = df_features["amount"] / (df_features["oldbalanceOrg"] + 1)  # Add 1 to avoid division by zero
-        df_features["amount_to_dest_balance_ratio"] = df_features["amount"] / (df_features["oldbalanceDest"] + 1)
+        # 3. Transaction Type Risk Score (with reduced risk scores)
+        risk_scores = {
+            "TRANSFER": 2.0,  # Reduced from 5.96
+            "CASH_OUT": 1.0,  # Reduced from 1.43
+            "PAYMENT": 0.0,   # No risk
+            "DEBIT": 0.0,     # No risk
+            "CASH_IN": 0.0    # No risk
+        }
+        df_engineered["transaction_type_risk"] = df_engineered["type"].map(risk_scores)
         
-        # Flag for zero initial balance
-        df_features["zero_org_balance"] = (df_features["oldbalanceOrg"] == 0).astype(int)
-        df_features["zero_dest_balance"] = (df_features["oldbalanceDest"] == 0).astype(int)
+        # 4. Recipient Balance Features (with safe division)
+        df_engineered["recipient_balance_ratio"] = np.where(
+            df_engineered["amount"] != 0,
+            df_engineered["oldbalanceDest"] / df_engineered["amount"],
+            1.0
+        )
         
-        # Flag for unusual transaction amounts (based on historical data)
-        amount_threshold = df_features["amount"].quantile(0.95)
-        df_features["unusual_amount"] = (df_features["amount"] > amount_threshold).astype(int)
+        # 5. Additional Risk Indicators
+        df_engineered["large_transaction"] = (df_engineered["amount"] > df_engineered["amount"].quantile(0.95)).astype(int)
+        df_engineered["zero_balance_org"] = (df_engineered["oldbalanceOrg"] == 0).astype(int)
+        df_engineered["zero_balance_dest"] = (df_engineered["oldbalanceDest"] == 0).astype(int)
         
-        # Step-based features (assuming step represents time)
-        df_features["step_hour"] = df_features["step"] % 24  # 24-hour cycle
-        df_features["step_day"] = df_features["step"] // 24  # Day number
-        df_features["is_night"] = ((df_features["step_hour"] >= 22) | (df_features["step_hour"] <= 5)).astype(int)
-        df_features["is_weekend"] = (df_features["step_day"] % 7 >= 5).astype(int)
+        # Handle any remaining infinite values
+        for col in df_engineered.columns:
+            if df_engineered[col].dtype in ['float64', 'float32']:
+                # Replace infinite values with the column's mean
+                mean_val = df_engineered[col].replace([np.inf, -np.inf], np.nan).mean()
+                df_engineered[col] = df_engineered[col].replace([np.inf, -np.inf], mean_val)
         
-        logger.info("Feature engineering completed")
-        return df_features
+        # Add new features to NUMERICAL_FEATURES
+        new_numerical_features = [
+            "amount_to_balance_ratio",
+            "hour",
+            "day",
+            "is_high_risk_hour",
+            "is_high_risk_day",
+            "transaction_type_risk",
+            "recipient_balance_ratio",
+            "large_transaction",
+            "zero_balance_org",
+            "zero_balance_dest"
+        ]
+        
+        # Update NUMERICAL_FEATURES
+        global NUMERICAL_FEATURES
+        NUMERICAL_FEATURES.extend(new_numerical_features)
+        
+        return df_engineered
 
     def encode_categorical_features(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
         """
@@ -664,95 +703,188 @@ class DataProcessor:
         logger.info("Saved feature statistics to data/processed/feature_stats.json")
 
     def process_data_pipeline(
-        self, 
+        self,
         sample_size: Optional[int] = None,
         test_size: float = 0.2,
         val_size: float = 0.1,
-        save_processed: bool = True,
-        random_state: int = 42
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+        random_state: int = 42,
+        handle_imbalance: bool = True,
+        smote_ratio: float = 0.2
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
         """
-        Run the full data processing pipeline.
+        Run the complete data processing pipeline.
 
         Args:
-            sample_size: Number of rows to sample (for testing)
-            test_size: Proportion of data for testing
-            val_size: Proportion of data for validation
-            save_processed: Whether to save processed data files
-            random_state: Random seed for reproducibility
+            sample_size: Number of rows to sample (for quick testing)
+            test_size: Proportion of data to use for testing
+            val_size: Proportion of remaining data to use for validation
+            random_state: Random state for reproducibility
+            handle_imbalance: Whether to handle class imbalance
+            smote_ratio: Target ratio of minority class after SMOTE (default: 0.2 or 20%)
 
         Returns:
-            Tuple containing X_train, X_val, X_test, y_train, y_val, y_test
+            Tuple containing (X_train, X_val, X_test, y_train, y_val, y_test, 
+                            amount_train, amount_val, amount_test)
         """
-        logger.info("Starting full data processing pipeline")
+        logger.info("Starting data processing pipeline")
         
         # Load raw data
-        raw_df = self.load_raw_data(sample_size=sample_size)
+        df = self.load_raw_data(sample_size)
+        
+        # Store transaction amounts before preprocessing
+        transaction_amounts = pd.DataFrame({
+            'amount': df['amount'].copy(),
+            'is_synthetic': False
+        })
         
         # Clean data
-        cleaned_df = self.clean_data(raw_df)
+        df_clean = self.clean_data(df)
         
-        # Save interim data if requested
-        if save_processed:
-            interim_path = self.interim_data_dir / "cleaned_data.csv"
-            cleaned_df.to_csv(interim_path, index=False)
-            logger.info(f"Saved cleaned data to {interim_path}")
+        # Drop high cardinality and potential data leakage columns
+        logger.info("Dropping high cardinality and potential data leakage columns")
+        columns_to_drop = COLUMNS_TO_DROP + ['newbalanceOrig', 'newbalanceDest']
+        df_clean = df_clean.drop(columns=columns_to_drop, errors='ignore')
         
         # Engineer features
-        featured_df = self.engineer_features(cleaned_df)
+        df_features = self.engineer_features(df_clean)
         
-        # Save interim data if requested
-        if save_processed:
-            interim_path = self.interim_data_dir / "featured_data.csv"
-            featured_df.to_csv(interim_path, index=False)
-            logger.info(f"Saved featured data to {interim_path}")
+        # Encode categorical features
+        df_encoded = self.encode_categorical_features(df_features)
         
-        # Prepare final features
-        prepared_df = self.prepare_features(featured_df)
+        # Scale numerical features
+        df_scaled = self.scale_numerical_features(df_encoded)
         
-        # Save processed data if requested
-        if save_processed:
-            processed_path = self.processed_data_dir / "prepared_data.csv"
-            prepared_df.to_csv(processed_path, index=False)
-            logger.info(f"Saved prepared data to {processed_path}")
+        # Handle class imbalance if requested
+        if handle_imbalance:
+            logger.info("Handling class imbalance using SMOTE")
             
-            # Save feature stats
-            self.save_feature_stats(prepared_df)
+            # Prepare features and target
+            X = df_scaled.drop("isFraud", axis=1)
+            y = df_scaled["isFraud"].values
+            
+            # Store column names before converting to numpy array
+            feature_columns = X.columns.tolist()
+            X = X.values
+            
+            # Calculate number of samples needed for desired ratio
+            n_majority = (y == 0).sum()
+            n_minority = (y == 1).sum()
+            target_minority = int(n_majority * smote_ratio)
+            n_samples_needed = target_minority - n_minority
+            
+            if n_samples_needed > 0:
+                # Apply SMOTE with calculated sampling strategy
+                smote = SMOTE(
+                    random_state=random_state,
+                    sampling_strategy={1: target_minority}
+                )
+                X_balanced, y_balanced = smote.fit_resample(X, y)
+                
+                # Reconstruct data using stored column names
+                df_scaled = pd.concat([
+                    pd.DataFrame(X_balanced, columns=feature_columns),
+                    pd.Series(y_balanced, name="isFraud")
+                ], axis=1)
+                
+                # Create synthetic transaction amounts that match the synthetic samples
+                fraud_indices = y == 1
+                fraud_amounts = transaction_amounts.loc[fraud_indices, 'amount']
+                n_repeats = n_samples_needed // len(fraud_amounts) + 1
+                synthetic_amounts = pd.concat([fraud_amounts] * n_repeats)
+                synthetic_amounts = synthetic_amounts[:n_samples_needed]
+                
+                # Create synthetic transactions DataFrame
+                synthetic_transactions = pd.DataFrame({
+                    'amount': synthetic_amounts,
+                    'is_synthetic': True
+                })
+                
+                # Combine original and synthetic transactions
+                transaction_amounts = pd.concat([
+                    transaction_amounts,
+                    synthetic_transactions
+                ]).reset_index(drop=True)
+                
+                logger.info(f"Balanced dataset size: {len(df_scaled)}")
+                logger.info(f"New fraud rate: {y_balanced.mean():.4f}")
+                logger.info(f"Average real transaction amount: ${transaction_amounts[~transaction_amounts['is_synthetic']]['amount'].mean():.2f}")
+                logger.info(f"Max real transaction amount: ${transaction_amounts[~transaction_amounts['is_synthetic']]['amount'].max():.2f}")
+                logger.info(f"Number of synthetic transactions: {transaction_amounts['is_synthetic'].sum()}")
+            else:
+                logger.info("No SMOTE needed - target ratio already achieved")
         
-        # Split into train/validation/test sets
-        train_data, val_data, test_data = self.split_data(
-            prepared_df, 
-            train_size=0.7,  # Fixed proportions
-            val_size=0.1,
-            target_col="is_fraud"
+        # Convert to numpy arrays for splitting
+        X = df_scaled.drop("isFraud", axis=1).values
+        y = df_scaled["isFraud"].values
+        amounts = transaction_amounts['amount'].values
+        is_synthetic = transaction_amounts['is_synthetic'].values
+        
+        # Split data into train and test first
+        X_train, X_test, y_train, y_test, amounts_train, amounts_test, is_synthetic_train, is_synthetic_test = train_test_split(
+            X, y, amounts, is_synthetic,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=y if handle_imbalance else None
         )
         
-        # Separate features and target
-        X_train = train_data.drop(columns=["is_fraud"])
-        y_train = train_data["is_fraud"]
+        # Further split training data into train and validation
+        X_train, X_val, y_train, y_val, amounts_train, amounts_val, is_synthetic_train, is_synthetic_val = train_test_split(
+            X_train, y_train, amounts_train, is_synthetic_train,
+            test_size=val_size,
+            random_state=random_state,
+            stratify=y_train if handle_imbalance else None
+        )
         
-        X_val = val_data.drop(columns=["is_fraud"])
-        y_val = val_data["is_fraud"]
+        # Convert back to pandas DataFrames/Series
+        train_data = pd.DataFrame(X_train, columns=df_scaled.drop("isFraud", axis=1).columns)
+        train_data["isFraud"] = y_train
+        val_data = pd.DataFrame(X_val, columns=df_scaled.drop("isFraud", axis=1).columns)
+        val_data["isFraud"] = y_val
+        test_data = pd.DataFrame(X_test, columns=df_scaled.drop("isFraud", axis=1).columns)
+        test_data["isFraud"] = y_test
         
-        X_test = test_data.drop(columns=["is_fraud"])
-        y_test = test_data["is_fraud"]
+        train_amounts = pd.DataFrame({
+            'amount': amounts_train,
+            'is_synthetic': is_synthetic_train
+        })
+        val_amounts = pd.DataFrame({
+            'amount': amounts_val,
+            'is_synthetic': is_synthetic_val
+        })
+        test_amounts = pd.DataFrame({
+            'amount': amounts_test,
+            'is_synthetic': is_synthetic_test
+        })
         
-        # Save splits if requested
-        if save_processed:
-            train_path = self.processed_data_dir / "train_data.csv"
-            pd.concat([X_train, y_train], axis=1).to_csv(train_path, index=False)
-            logger.info(f"Saved training data to {train_path}")
-            
-            val_path = self.processed_data_dir / "val_data.csv"
-            pd.concat([X_val, y_val], axis=1).to_csv(val_path, index=False)
-            logger.info(f"Saved validation data to {val_path}")
-            
-            test_path = self.processed_data_dir / "test_data.csv"
-            pd.concat([X_test, y_test], axis=1).to_csv(test_path, index=False)
-            logger.info(f"Saved test data to {test_path}")
+        # Save processed data
+        self.save_processed_data(train_data, val_data, test_data)
         
-        logger.info("Data processing pipeline completed successfully")
-        return X_train, X_val, X_test, y_train, y_val, y_test
+        logger.info("Data processing pipeline completed")
+        return (
+            train_data.drop("isFraud", axis=1),
+            val_data.drop("isFraud", axis=1),
+            test_data.drop("isFraud", axis=1),
+            train_data["isFraud"],
+            val_data["isFraud"],
+            test_data["isFraud"],
+            train_amounts,
+            val_amounts,
+            test_amounts
+        )
+
+    def save_processed_data(self, train_data: pd.DataFrame, val_data: pd.DataFrame, test_data: pd.DataFrame) -> None:
+        """Save processed datasets to files."""
+        logger.info("Saving processed datasets")
+        
+        # Create processed data directory if it doesn't exist
+        os.makedirs(self.processed_data_dir, exist_ok=True)
+        
+        # Save datasets
+        train_data.to_csv(self.processed_data_dir / "train_data.csv", index=False)
+        val_data.to_csv(self.processed_data_dir / "val_data.csv", index=False)
+        test_data.to_csv(self.processed_data_dir / "test_data.csv", index=False)
+        
+        logger.info(f"Saved processed datasets to {self.processed_data_dir}")
 
     def preprocess_transaction(self, transaction: Dict) -> np.ndarray:
         """
@@ -834,20 +966,109 @@ class DataProcessor:
         logger.info(f"Processed training data shape: {df_clean.shape}")
         return df_clean
 
+    def test_data_strategies(
+        self,
+        df: pd.DataFrame,
+        test_size: float = 0.2,
+        val_size: float = 0.1,
+        random_state: int = 42
+    ) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
+        """
+        Test different data splitting and balancing strategies.
+        
+        Args:
+            df: Input data
+            test_size: Proportion of data to use for testing
+            val_size: Proportion of remaining data to use for validation
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            Dictionary containing different splitting strategies and their results
+        """
+        logger.info("Testing different data splitting and balancing strategies")
+        
+        # Drop string columns that shouldn't be used for modeling
+        string_columns = df.select_dtypes(include=['object']).columns
+        df_model = df.drop(columns=string_columns)
+        
+        # 1. Pure time-based splitting (current implementation)
+        time_based = self.split_data(
+            df_model,
+            train_size=1-test_size-val_size,
+            val_size=val_size,
+            target_col="isFraud"
+        )
+        
+        # 2. Random splitting with stratification
+        train_data, test_data = train_test_split(
+            df_model,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=df_model["isFraud"]
+        )
+        train_data, val_data = train_test_split(
+            train_data,
+            test_size=val_size,
+            random_state=random_state,
+            stratify=train_data["isFraud"]
+        )
+        
+        # 3. Time-based splitting with SMOTE
+        time_based_smote = list(time_based)
+        X_train = time_based_smote[0].drop("isFraud", axis=1).values
+        y_train = time_based_smote[0]["isFraud"].values
+        
+        smote = SMOTE(random_state=random_state)
+        X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+        
+        time_based_smote[0] = pd.concat([
+            pd.DataFrame(X_train_balanced, columns=time_based_smote[0].drop("isFraud", axis=1).columns),
+            pd.Series(y_train_balanced, name="isFraud")
+        ], axis=1)
+        
+        # 4. Random splitting with stratification and SMOTE
+        X_train = train_data.drop("isFraud", axis=1).values
+        y_train = train_data["isFraud"].values
+        
+        X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+        
+        train_data_balanced = pd.concat([
+            pd.DataFrame(X_train_balanced, columns=train_data.drop("isFraud", axis=1).columns),
+            pd.Series(y_train_balanced, name="isFraud")
+        ], axis=1)
+        
+        # Log statistics for each strategy
+        strategies = {
+            "time_based": time_based,
+            "random_stratified": (train_data, val_data, test_data),
+            "time_based_smote": tuple(time_based_smote),
+            "random_stratified_smote": (train_data_balanced, val_data, test_data)
+        }
+        
+        for name, (train, val, test) in strategies.items():
+            logger.info(f"\n{name} strategy statistics:")
+            logger.info(f"Training set size: {len(train)}")
+            logger.info(f"Validation set size: {len(val)}")
+            logger.info(f"Test set size: {len(test)}")
+            logger.info(f"Training fraud rate: {train['isFraud'].mean():.4f}")
+            logger.info(f"Validation fraud rate: {val['isFraud'].mean():.4f}")
+            logger.info(f"Test fraud rate: {test['isFraud'].mean():.4f}")
+        
+        return strategies
 
 if __name__ == "__main__":
     # Example usage
     processor = DataProcessor()
     
     # Process the full dataset
-    X_train, X_val, X_test, y_train, y_val, y_test = processor.process_data_pipeline(
+    X_train, X_val, X_test, y_train, y_val, y_test, train_amounts, val_amounts, test_amounts = processor.process_data_pipeline(
         sample_size=None,  # Use the full dataset
         save_processed=True
     )
     
-    print(f"Training data shape: {X_train.shape}")
-    print(f"Validation data shape: {X_val.shape}")
-    print(f"Test data shape: {X_test.shape}")
+    print(f"Training data shape: {X_train.shape}, {y_train.shape}")
+    print(f"Validation data shape: {X_val.shape}, {y_val.shape}")
+    print(f"Test data shape: {X_test.shape}, {y_test.shape}")
     
     # Show feature stats
     print("\nTop features correlated with fraud:")

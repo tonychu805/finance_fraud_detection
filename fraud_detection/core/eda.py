@@ -7,9 +7,10 @@ including univariate, bivariate, and time series analysis.
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import json
+import numpy as np
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy import stats
@@ -103,6 +104,78 @@ class FraudEDA:
               (self.df[self.df[target] == 0][feature].value_counts() / self.df[self.df[target] == 0][feature].count())) * woe
         
         return iv.sum()
+
+    def calculate_statistical_significance(self, feature: str, target: str = 'isFraud') -> Dict:
+        """
+        Calculate statistical significance tests for a feature.
+        
+        Args:
+            feature: Feature name
+            target: Target variable name
+            
+        Returns:
+            Dictionary containing statistical test results
+        """
+        results = {}
+        
+        if feature in self.numerical_features:
+            # For numerical features, use t-test
+            fraud_values = self.df[self.df[target] == 1][feature]
+            legit_values = self.df[self.df[target] == 0][feature]
+            
+            # Perform t-test
+            t_stat, p_value = stats.ttest_ind(fraud_values, legit_values, equal_var=False)
+            
+            # Calculate effect size (Cohen's d)
+            n1, n2 = len(fraud_values), len(legit_values)
+            var1, var2 = fraud_values.var(), legit_values.var()
+            pooled_se = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+            cohens_d = (fraud_values.mean() - legit_values.mean()) / pooled_se
+            
+            results = {
+                'test_type': 't-test',
+                'statistic': t_stat,
+                'p_value': p_value,
+                'effect_size': cohens_d,
+                'significant': p_value < 0.05
+            }
+            
+        elif feature in self.categorical_features:
+            # For categorical features, use chi-square test
+            contingency_table = pd.crosstab(self.df[feature], self.df[target])
+            chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+            
+            # Calculate Cramer's V for effect size
+            n = contingency_table.sum().sum()
+            min_dim = min(contingency_table.shape) - 1
+            cramers_v = np.sqrt(chi2 / (n * min_dim))
+            
+            results = {
+                'test_type': 'chi-square',
+                'statistic': chi2,
+                'p_value': p_value,
+                'effect_size': cramers_v,
+                'significant': p_value < 0.05
+            }
+            
+        elif feature in self.binary_features:
+            # For binary features, use chi-square test
+            contingency_table = pd.crosstab(self.df[feature], self.df[target])
+            chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+            
+            # Calculate phi coefficient for effect size
+            n = contingency_table.sum().sum()
+            phi = np.sqrt(chi2 / n)
+            
+            results = {
+                'test_type': 'chi-square',
+                'statistic': chi2,
+                'p_value': p_value,
+                'effect_size': phi,
+                'significant': p_value < 0.05
+            }
+            
+        return results
     
     def analyze_population_patterns(self) -> Dict:
         """
@@ -128,12 +201,17 @@ class FraudEDA:
             fraud_rate = type_data['isFraud'].mean()
             risk_ratio = fraud_rate / overall_fraud_rate
             effect_size = self.calculate_effect_size(fraud_rate, overall_fraud_rate)
+            
+            # Add statistical significance
+            stats_results = self.calculate_statistical_significance('type')
+            
             type_analysis[type_] = {
                 'fraud_rate': fraud_rate,
                 'risk_ratio': risk_ratio,
                 'effect_size': effect_size,
                 'transaction_count': len(type_data),
-                'fraud_count': type_data['isFraud'].sum()
+                'fraud_count': type_data['isFraud'].sum(),
+                'statistical_significance': stats_results
             }
         results['transaction_types'] = type_analysis
         
@@ -141,6 +219,9 @@ class FraudEDA:
         for feature in self.numerical_features:
             fraud_values = self.df[self.df['isFraud'] == 1][feature]
             legit_values = self.df[self.df['isFraud'] == 0][feature]
+            
+            # Add statistical significance
+            stats_results = self.calculate_statistical_significance(feature)
             
             results[feature] = {
                 'fraud': {
@@ -161,7 +242,8 @@ class FraudEDA:
                     'mean_difference': fraud_values.mean() - legit_values.mean(),
                     'variance_ratio': fraud_values.var() / legit_values.var(),
                     'information_value': self.calculate_information_value(feature, 'isFraud')
-                }
+                },
+                'statistical_significance': stats_results
             }
             
             # Create distribution plot
@@ -185,12 +267,17 @@ class FraudEDA:
                 fraud_rate = value_data['isFraud'].mean()
                 risk_ratio = fraud_rate / overall_fraud_rate
                 effect_size = self.calculate_effect_size(fraud_rate, overall_fraud_rate)
+                
+                # Add statistical significance
+                stats_results = self.calculate_statistical_significance(feature)
+                
                 value_analysis[value] = {
                     'fraud_rate': fraud_rate,
                     'risk_ratio': risk_ratio,
                     'effect_size': effect_size,
                     'transaction_count': len(value_data),
-                    'fraud_count': value_data['isFraud'].sum()
+                    'fraud_count': value_data['isFraud'].sum(),
+                    'statistical_significance': stats_results
                 }
             
             results[feature] = value_analysis
@@ -198,30 +285,26 @@ class FraudEDA:
         # 5. Binary Features Analysis
         for feature in self.binary_features:
             value_analysis = {}
+            
+            # Add statistical significance
+            stats_results = self.calculate_statistical_significance(feature)
+            
             for value in self.df[feature].unique():
                 value_data = self.df[self.df[feature] == value]
                 fraud_rate = value_data['isFraud'].mean()
                 risk_ratio = fraud_rate / overall_fraud_rate
                 effect_size = self.calculate_effect_size(fraud_rate, overall_fraud_rate)
+                
                 value_analysis[value] = {
                     'fraud_rate': fraud_rate,
                     'risk_ratio': risk_ratio,
                     'effect_size': effect_size,
                     'transaction_count': len(value_data),
-                    'fraud_count': value_data['isFraud'].sum()
+                    'fraud_count': value_data['isFraud'].sum(),
+                    'statistical_significance': stats_results
                 }
             
             results[feature] = value_analysis
-            
-            # Create fraud rate plot
-            plt.figure(figsize=(10, 6))
-            plot_df = self.df.copy()
-            # Convert binary feature values to strings for better plotting
-            plot_df[feature] = plot_df[feature].astype(str)
-            sns.barplot(data=plot_df, x=feature, y='isFraud')
-            plt.title(f'Fraud Rates by {feature}')
-            plt.savefig(f'data/processed/eda/{feature}_fraud_rates.png')
-            plt.close()
         
         return results
     
@@ -323,6 +406,24 @@ class FraudEDA:
         
         return results
     
+    def _convert_to_native_types(self, obj):
+        """Convert numpy types to native Python types for JSON serialization."""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, dict):
+            # Convert both keys and values
+            return {str(key) if isinstance(key, (np.integer, np.floating)) else key: 
+                   self._convert_to_native_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_native_types(item) for item in obj]
+        return obj
+
     def run_full_analysis(self) -> Dict:
         """
         Run all EDA analyses and save results.
@@ -332,23 +433,24 @@ class FraudEDA:
         """
         logger.info("Starting comprehensive EDA")
         
-        # Create output directory
-        output_dir = Path("data/processed/eda")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
         # Run all analyses
         results = {
             "population_analysis": self.analyze_population_patterns(),
-            "time_series": self.time_series_analysis(),
-            "false_negatives": self.analyze_false_negatives()
+            "time_series_analysis": self.time_series_analysis(),
+            "false_negative_analysis": self.analyze_false_negatives()
         }
         
-        # Save results to JSON
-        import json
+        # Convert numpy types to native Python types
+        results = self._convert_to_native_types(results)
+        
+        # Save results
+        output_dir = Path("data/interim/eda")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         with open(output_dir / "eda_results.json", "w") as f:
             json.dump(results, f, indent=2)
             
-        logger.info("EDA completed successfully")
+        logger.info("EDA results saved to data/interim/eda/eda_results.json")
         return results
 
 if __name__ == "__main__":
