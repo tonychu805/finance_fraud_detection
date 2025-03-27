@@ -552,10 +552,6 @@ class DataProcessor:
         # Basic feature engineering
         df_featured = self._engineer_basic_features(df_clean)
         
-        # Save interim data
-        df_featured.to_csv(self.interim_data_dir / "featured_data.csv", index=False)
-        logger.info("Saved featured data to data/interim/featured_data.csv")
-        
         return df_featured
 
     def _engineer_basic_features(self, df: pd.DataFrame) -> pd.DataFrame:

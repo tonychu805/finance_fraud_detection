@@ -9,6 +9,42 @@
   - LightGBM Classifier (with probability calibration)
   - Random Forest Classifier (with probability calibration)
 
+## EDA and Model Training Relationship
+
+### EDA Insights and Feature Selection
+The model's feature selection and engineering decisions are based on comprehensive EDA results:
+
+1. **Transaction Type Analysis**:
+   - TRANSFER transactions show highest fraud risk (5.96x risk ratio, 0.77% fraud rate)
+   - CASH_OUT transactions are second highest risk (1.43x risk ratio, 0.18% fraud rate)
+   - Other transaction types (PAYMENT, DEBIT, CASH_IN) show no fraud cases
+
+2. **Feature Importance (Information Value)**:
+   - oldbalanceOrg: 2.068 (highest predictive power)
+   - newbalanceOrig: 1.277
+   - amount: 1.269
+   - oldbalanceDest: 0.270
+   - newbalanceDest: 0.078 (dropped due to low predictive power)
+
+3. **Feature Engineering Decisions**:
+   - Time-based features from 'step' column
+   - Balance change ratios derived from EDA insights
+   - Transaction type risk scores based on EDA risk ratios
+
+### Data Processing Pipeline
+The EDA results directly influence our data processing pipeline:
+1. Feature selection based on Information Value
+2. Outlier handling thresholds determined from EDA
+3. Class imbalance handling informed by fraud rate analysis
+4. Transaction type encoding based on risk analysis
+
+### Model Training Considerations
+EDA insights guide several aspects of model training:
+1. Class weights adjusted based on fraud rate analysis
+2. Threshold optimization informed by cost analysis
+3. Model evaluation metrics chosen based on business impact
+4. Feature importance monitoring aligned with EDA findings
+
 ## Performance Summary
 
 ### LightGBM

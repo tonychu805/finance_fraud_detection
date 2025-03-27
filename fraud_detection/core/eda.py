@@ -253,7 +253,7 @@ class FraudEDA:
             plot_df['isFraud'] = plot_df['isFraud'].map({0: 'Legitimate', 1: 'Fraud'})
             sns.boxplot(data=plot_df, x='isFraud', y=feature)
             plt.title(f'Distribution of {feature} by Fraud Status')
-            plt.savefig(f'data/processed/eda/{feature}_fraud_distribution.png')
+            plt.savefig(f'data/interim/eda/{feature}_fraud_distribution.png')
             plt.close()
         
         # 4. High Cardinality Features Analysis
@@ -339,13 +339,13 @@ class FraudEDA:
         plt.figure(figsize=(12, 6))
         hourly_fraud.plot(kind="line")
         plt.title("Fraud Rates by Hour")
-        plt.savefig("data/processed/eda/hourly_fraud_rates.png")
+        plt.savefig("data/interim/eda/hourly_fraud_rates.png")
         plt.close()
         
         plt.figure(figsize=(12, 6))
         daily_fraud.plot(kind="line")
         plt.title("Fraud Rates by Day")
-        plt.savefig("data/processed/eda/daily_fraud_rates.png")
+        plt.savefig("data/interim/eda/daily_fraud_rates.png")
         plt.close()
         
         return results
