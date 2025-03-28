@@ -19,26 +19,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def get_cv_results_dir():
+    """Create and return the directory for cross-validation results."""
+    # Get current version from timestamp
+    version = datetime.now().strftime("%Y.%m.%d")
+    
+    # Create directory structure
+    base_dir = Path("models/cross_validation")
+    version_dir = base_dir / f"v{version}"
+    results_dir = version_dir / "results"
+    
+    # Create directories if they don't exist
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    return results_dir
+
 def load_processed_data():
     """Load processed data from the processed directory."""
     processed_dir = Path("data/processed")
     
     # Load training data
     train_data = pd.read_csv(processed_dir / "train_data.csv")
-    train_amounts = pd.read_csv(processed_dir / "train_amounts.csv")
     
     # Separate features and target
     X_train = train_data.drop("isFraud", axis=1)
     y_train = train_data["isFraud"]
     
-    return X_train, y_train, train_amounts
+    return X_train, y_train
 
 async def main():
     """Run cross-validation for different model types."""
     try:
         # Load processed data
         logger.info("Loading processed data")
-        X_train, y_train, train_amounts = load_processed_data()
+        X_train, y_train = load_processed_data()
         
         # Model types to evaluate
         model_types = ['ensemble', 'lightgbm', 'random_forest']
@@ -48,45 +62,32 @@ async def main():
         
         # Run cross-validation for each model type
         for model_type in model_types:
-            logger.info(f"\nRunning cross-validation for {model_type} model")
-            
-            # Initialize cross-validator
-            cv = CrossValidator(
-                n_splits=5,
-                random_state=42,
-                model_type=model_type
-            )
-            
-            # Perform cross-validation
-            cv_results = cv.cross_validate(
-                X_train,
-                y_train,
-                train_amounts,
-                feature_names=X_train.columns.tolist()
-            )
-            
-            # Store results
-            all_results[model_type] = cv_results
+            try:
+                logger.info(f"\nRunning cross-validation for {model_type}")
+                cv = CrossValidator(model_type=model_type)
+                results = cv.cross_validate(X_train, y_train)
+                all_results[model_type] = results
+                
+                # Log results for this model
+                logger.info(f"\n{model_type.upper()} Cross-validation Results:")
+                logger.info(f"Mean Precision: {results['mean_precision']:.4f} (±{results['std_precision']:.4f})")
+                logger.info(f"Mean Recall: {results['mean_recall']:.4f} (±{results['std_recall']:.4f})")
+                logger.info(f"Mean F1 Score: {results['mean_f1']:.4f} (±{results['std_f1']:.4f})")
+                logger.info(f"Mean ROC AUC: {results['mean_roc_auc']:.4f} (±{results['std_roc_auc']:.4f})")
+                
+            except Exception as e:
+                logger.error(f"Error during cross-validation for {model_type}: {str(e)}")
+                continue
         
         # Save results
-        version = datetime.now().strftime("%Y.%m.%d")
-        results_dir = Path(f"models/v{version}_cv_results")
-        results_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = get_cv_results_dir()
+        results_file = results_dir / f"cv_results_{timestamp}.json"
         
-        results_file = results_dir / "cross_validation_results.json"
         with open(results_file, 'w') as f:
             json.dump(all_results, f, indent=4)
         
         logger.info(f"\nCross-validation results saved to {results_file}")
-        
-        # Print summary
-        logger.info("\nCross-validation Summary:")
-        for model_type, results in all_results.items():
-            logger.info(f"\n{model_type.upper()} Model:")
-            logger.info(f"Mean F1 Score: {results['mean_f1']:.4f} (±{results['std_f1']:.4f})")
-            logger.info(f"Mean ROC AUC: {results['mean_roc_auc']:.4f} (±{results['std_roc_auc']:.4f})")
-            logger.info(f"Mean Net Savings: ${results['mean_net_savings']:,.2f} (±${results['std_net_savings']:,.2f})")
-            logger.info(f"Mean ROI: {results['mean_roi']:.2f}% (±{results['std_roi']:.2f}%)")
         
     except Exception as e:
         logger.error(f"Error during cross-validation: {str(e)}")

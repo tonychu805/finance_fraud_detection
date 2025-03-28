@@ -9,6 +9,56 @@
   - LightGBM Classifier (with probability calibration)
   - Random Forest Classifier (with probability calibration)
 
+## Model Selection Rationale
+
+### LightGBM Selection Criteria
+1. **Speed and Efficiency**:
+   - Leaf-wise (best-first) tree growth for faster training
+   - Lower memory usage due to efficient data structure
+   - Well-suited for large-scale financial transaction data
+
+2. **Imbalanced Data Handling**:
+   - Built-in support for imbalanced datasets
+   - Automatic class weight adjustment
+   - Compatible with SMOTE balancing technique
+
+3. **Feature Importance**:
+   - Built-in feature importance ranking
+   - Helps identify key fraud indicators
+   - Supports feature selection and model interpretation
+
+### Random Forest Selection Criteria
+1. **Robustness**:
+   - Ensemble nature reduces overfitting
+   - Handles outliers effectively
+   - Works well with high-dimensional data
+
+2. **Non-linear Relationships**:
+   - Captures complex, non-linear patterns
+   - No assumptions about data distribution
+   - Handles both numerical and categorical features
+
+3. **Parallel Processing**:
+   - Supports parallel training
+   - Efficient for large datasets
+   - Fast prediction times
+
+### Ensemble Benefits
+1. **Complementary Strengths**:
+   - LightGBM: Fast, efficient, good with imbalanced data
+   - Random Forest: Robust, less prone to overfitting
+   - Combined approach improves generalization
+
+2. **Fraud Detection Specifics**:
+   - Different models catch different fraud patterns
+   - Reduces model-specific biases
+   - Improves prediction stability
+
+3. **Practical Considerations**:
+   - Both provide feature importance rankings
+   - Production-ready libraries
+   - Easy deployment and maintenance
+
 ## EDA and Model Training Relationship
 
 ### EDA Insights and Feature Selection

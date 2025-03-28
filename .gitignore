@@ -48,6 +48,15 @@ evaluation/feature_importance/
 evaluation/threshold_analysis/
 !evaluation/.gitkeep
 
+# Model analysis reports
+reports/
+reports/model_analysis/
+reports/model_analysis/*/
+reports/feature_analysis/
+reports/performance_analysis/
+reports/visualizations/
+!reports/.gitkeep
+
 # IDE
 .idea/
 .vscode/
@@ -143,3 +152,10 @@ data/external/*
 # Model version directories
 models/v*/
 !models/v*/.gitkeep
+
+# Cache directories
+.cache/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
