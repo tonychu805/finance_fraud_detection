@@ -51,8 +51,8 @@ fraud_detection/
 ```
 
 ## Dataset
-- Issues: [GitHub Issues](https://github.com/your-username/finance-fraud-detection/issues)
-- Contributors and maintainers
+- https://www.kaggle.com/datasets/jainilcoder/online-payment-fraud-detection
+
 
 ### Features
 - `step`: Time unit (1 step = 1 hour)
