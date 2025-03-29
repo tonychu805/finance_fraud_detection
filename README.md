@@ -166,7 +166,7 @@ The dataset used in this project is licensed under the Creative Commons CC0 1.0 
 ## Support
 - Documentation: [docs/](docs/)
 - Issues: [GitHub Issues](https://github.com/your-username/finance-fraud-detection/issues)
-- Email: [Add Contact Email]
+
 
 
 ---
